@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 
 namespace LangM;
 
@@ -35,6 +36,20 @@ public partial class KeyboardLanguageTracker : Form
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(
+        int nLeftRect,      
+        int nTopRect,       
+        int nRightRect,     
+        int nBottomRect,    
+        int nWidthEllipse,  
+        int nHeightEllipse  
+    );
+
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct CURSORINFO
@@ -69,7 +84,9 @@ public partial class KeyboardLanguageTracker : Form
             return cp;
         }
     }
-
+    
+    private AppSettings _appSettings = LoadColors(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json"));
+    
     public KeyboardLanguageTracker()
     {
         InitializeComponents();
@@ -110,6 +127,7 @@ public partial class KeyboardLanguageTracker : Form
             this.TransparencyKey = Color.Black;
             this.StartPosition = FormStartPosition.Manual;
             this.Size = new Size(300, 100);
+            this.DoubleBuffered = true;
             
             this.ShowInTaskbar = false;
             this.WindowState = FormWindowState.Normal;
@@ -117,16 +135,17 @@ public partial class KeyboardLanguageTracker : Form
             debugLabel = new Label
             {
                 AutoSize = true,
-                BackColor = ColorTranslator.FromHtml("#181818"),
-                ForeColor = ColorTranslator.FromHtml("#e0e0e0"),
+                BackColor = ColorTranslator.FromHtml(_appSettings.BackgroundColor),
+                ForeColor = ColorTranslator.FromHtml(_appSettings.ForegroundColor),
                 Font = new Font("Consolas", 9),
                 Padding = new Padding(5),
                 BorderStyle = BorderStyle.None,
                 MaximumSize = new Size(300, 0)
             };
-
+            
             this.Controls.Add(debugLabel);
-
+            ApplyRoundedCorners();
+            
             this.KeyPreview = true;
             this.KeyDown += (s, e) =>
             {
@@ -140,6 +159,51 @@ public partial class KeyboardLanguageTracker : Form
         {
             MessageBox.Show($"{ex.Message}");
         }
+        
+    }
+    
+    public static AppSettings LoadColors(string filePath)
+    {
+        string jsonContent = File.ReadAllText(filePath);
+        return JsonSerializer.Deserialize<AppSettings>(jsonContent);
+    }
+    
+    private void ApplyRoundedCorners()
+    {
+        if (debugLabel != null)
+        {
+            SetControlRoundedCorners(debugLabel, 10);
+        }
+    }
+    
+    protected override async void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        if (debugLabel != null)
+        {
+           ApplyRoundedCorners();
+        }
+    }
+    
+    private void SetControlRoundedCorners(Control control, int cornerRadius)
+    {
+        if (control == null)
+        {
+            throw new ArgumentNullException(nameof(control), "Control cannot be null.");
+        }
+
+        if (control.Width > 0 && control.Height > 0)
+        {
+            IntPtr hRgn = CreateRoundRectRgn(0, 0, control.Width, control.Height, cornerRadius, cornerRadius);
+            if (hRgn != IntPtr.Zero)
+            {
+                control.Region = Region.FromHrgn(hRgn);
+            }
+        }
+        else
+        {
+            throw new InvalidOperationException("Control's width and height must be greater than 0.");
+        }
     }
 
     private void SetupTimer()
@@ -148,7 +212,7 @@ public partial class KeyboardLanguageTracker : Form
         {
             timer = new System.Windows.Forms.Timer
             {
-                Interval = 5
+                Interval = _appSettings.UpdateTime
             };
             timer.Tick += new EventHandler(Timer_Tick);
             timer.Start();
@@ -163,7 +227,8 @@ public partial class KeyboardLanguageTracker : Form
     {
         get { return true; }
     }
-    static LanguageMapper languageMapper = new LanguageMapper("languages.json");
+    static LanguageMapper languageMapper = new LanguageMapper(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "languages.json"));
+    private bool isLayoutUpdated = false;
     private void Timer_Tick(object sender, EventArgs e)
     {
         try
@@ -186,8 +251,13 @@ public partial class KeyboardLanguageTracker : Form
                     ShowWindow(this.Handle, SW_SHOWNOACTIVATE);
                 }
             }
-
+            this.TopMost = true;
             debugLabel.Text = debugInfo.ToString();
+            if (!isLayoutUpdated)
+            {
+                ApplyRoundedCorners();
+                isLayoutUpdated = true;
+            }
             this.Size = new Size(300, debugLabel.PreferredHeight + 10);
         }
         catch (Exception ex)
