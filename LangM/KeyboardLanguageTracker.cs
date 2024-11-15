@@ -1,7 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Windows.Forms;
 
 namespace LangM;
 
@@ -233,35 +238,54 @@ public partial class KeyboardLanguageTracker : Form
     {
         try
         {
-            StringBuilder debugInfo = new StringBuilder();
+            var cursorInfo = new CURSORINFO();
+            cursorInfo.cbSize = (uint)Marshal.SizeOf(typeof(CURSORINFO));
 
-            if (GetCursorPos(out POINT cursorPos))
+            if (GetCursorInfo(out cursorInfo) && 
+                (cursorInfo.flags & CURSOR_SHOWING) != 0)
             {
-                IntPtr windowUnderCursor = WindowFromPoint(cursorPos);
-                
-                if (windowUnderCursor != IntPtr.Zero)
-                {
-                    uint processId;
-                    uint threadId = GetWindowThreadProcessId(windowUnderCursor, out processId);
-                    IntPtr keyboardLayout = GetKeyboardLayout(threadId);
-                    string language = languageMapper.GetLanguageFromHKL(keyboardLayout);
-                    debugInfo.AppendLine($"{language.Split("=>")[1].Trim()}");
+                var hCursor = cursorInfo.hCursor;
+                LoadedCursor = LoadCursor(IntPtr.Zero, (IntPtr)IDC_IBEAM);
 
-                    this.Location = new Point(cursorPos.X + 20, cursorPos.Y + 20);
-                    ShowWindow(this.Handle, SW_SHOWNOACTIVATE);
+                if (hCursor.ToInt64() == LoadedCursor.ToInt64())
+                {
+                    if (GetCursorPos(out POINT cursorPos))
+                    {
+                        IntPtr windowUnderCursor = WindowFromPoint(cursorPos);
+                        if (windowUnderCursor != IntPtr.Zero)
+                        {
+                            uint threadId = GetWindowThreadProcessId(GetForegroundWindow(), out uint _);
+                            IntPtr keyboardLayout = GetKeyboardLayout(threadId);
+                            string language = languageMapper.GetLanguageFromHKL(keyboardLayout);
+                            
+                            debugLabel.Text = language.Split("=>")[1].Trim();
+                            
+                            this.Location = new Point(cursorPos.X + 20, cursorPos.Y + 20);
+                            
+                            this.Size = new Size(debugLabel.PreferredWidth + 10, debugLabel.PreferredHeight + 10);
+                            
+                            this.Visible = true;
+                            ShowWindow(this.Handle, SW_SHOWNOACTIVATE);
+                            this.TopMost = true;
+                            
+                            return; 
+                        }
+                    }
                 }
             }
-            debugLabel.Text = debugInfo.ToString();
-            if (!isLayoutUpdated)
-            {
-                ApplyRoundedCorners();
-                isLayoutUpdated = true;
-            }
-            this.Size = new Size(300, debugLabel.PreferredHeight + 10);
+            this.Visible = false;
+
         }
         catch (Exception ex)
         {
-            debugLabel.Text = $"Error: {ex.Message}";
+            MessageBox.Show($"Error: {ex.Message}");
         }
     }
+    
+    private const uint IDC_IBEAM = 32513;
+    private const uint CURSOR_SHOWING = 0x00000001;
+    
+    [DllImport("user32.dll")]
+    private static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
+    private IntPtr LoadedCursor = IntPtr.Zero;
 }
