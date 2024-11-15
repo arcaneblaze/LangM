@@ -251,7 +251,6 @@ public partial class KeyboardLanguageTracker : Form
                     ShowWindow(this.Handle, SW_SHOWNOACTIVATE);
                 }
             }
-            this.TopMost = true;
             debugLabel.Text = debugInfo.ToString();
             if (!isLayoutUpdated)
             {
